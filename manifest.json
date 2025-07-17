@@ -1,0 +1,29 @@
+{
+  "name": "DashCraft Tools",
+  "description": "Base Level Extension",
+  "version": "1.0",
+  "manifest_version": 3,
+  "externally_connectable": {
+    "ids": ["*"],
+    "matches": ["https://dashcraft.io/*"]
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://dashcraft.io/*"],
+      "js": ["injectedscript.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+
+  "permissions": [
+    "activeTab",
+    "declarativeContent",
+    "storage"
+  ],
+
+  "action": {
+    "default_icon": "icon.png"
+  }
+}
