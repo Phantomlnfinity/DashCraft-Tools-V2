@@ -76,10 +76,13 @@ let rmc = {
     }
 }
 
+
+let testInput;
 let jsonEditor = {
     public: {
         reset: (button) => {
             jsonEditor.public.force = localStorage.getItem("forcePublic") === "true";
+            button.classList.add("toggleButton");
             button.classList.toggle("enabled", jsonEditor.public.force);
         },
         force: false,
@@ -92,12 +95,14 @@ let jsonEditor = {
     trackData: {
         resetToggle: (button) => {
             jsonEditor.trackData.override = localStorage.getItem("trackDataToggle") === "true";
+            button.classList.add("toggleButton");
             button.classList.toggle("enabled", jsonEditor.trackData.override);
         },
-        resetInput: (input) => {
+        resetInput: (input, container) => {
             jsonEditor.trackData.input = localStorage.getItem("trackDataInput");
             input.value = jsonEditor.trackData.input;
-            jsonEditor.trackData.update(input);
+            container.classList.add("validCheck");
+            jsonEditor.trackData.update(input, container);
         },
 
         override: false,
@@ -108,7 +113,7 @@ let jsonEditor = {
         },
         input: null,
         stored: null,
-        update: (input) => {
+        update: (input, container) => {
             jsonEditor.trackData.input = input.value;
             localStorage.setItem("trackDataInput", input.value);
             const value = input.value.trim();
@@ -118,14 +123,18 @@ let jsonEditor = {
                     .then(response => response.json())
                     .catch(error => {
                         jsonEditor.trackData.stored = null;
+                        container.classList.add("invalid");
                         return;
                     })
                     .then(data => {
                         if (!data) return;
+                        container.classList.remove("invalid");
                         jsonEditor.trackData.stored = data;
                         realFetch(`https://api.dashcraft.io/trackv2/${id}`)
                             .then(response => response.json())
-                            .then(data => jsonEditor.trackData.stored.screenshotCameraPosition = data.screenshotCameraPosition);
+                            .then(data => {
+                                jsonEditor.trackData.stored.screenshotCameraPosition = data.screenshotCameraPosition
+                            });
                     });
             } else {
                 try {
@@ -135,8 +144,10 @@ let jsonEditor = {
                     } else {
                         jsonEditor.trackData.stored = {trackPieces: inputJson};
                     };
+                    container.classList.remove("invalid");
                 } catch (e) {
                     jsonEditor.trackData.stored = null;
+                    container.classList.add("invalid");
                 }
             }
         },
@@ -148,6 +159,7 @@ let misc = {
         value: null,
         resetButton: (toggle) => {
             misc.pageSize.override = localStorage.getItem("pageSizeToggle") === "true";
+            toggle.classList.add("toggleButton");
             toggle.classList.toggle("enabled", misc.pageSize.override);
         },
         resetInput: (input) => {
@@ -177,6 +189,8 @@ let misc = {
         position: {
             reset: (button) => {
                 misc.thumbnailData.position.enabled = localStorage.getItem("thumbnailPosition") === "true";
+                button.classList.add("toggleButton");
+                console.log("test: " + button.classList);
                 button.classList.toggle("enabled", misc.thumbnailData.position.enabled);
             },
             enabled: false,
@@ -194,6 +208,7 @@ let accountSwitcher = {
     autoAdd: {
         reset: (button) => {
             accountSwitcher.autoAdd.value = localStorage.getItem("autoAdd") === "true";
+            button.classList.add("toggleButton");
             button.classList.toggle("enabled", accountSwitcher.autoAdd.value);
         },
         value: false,
@@ -217,18 +232,17 @@ let accountSwitcher = {
         }
     },
     cycleMode: (button) => {
-        accountSwitcher.mode = (accountSwitcher.mode + 1) % 2;
-
-        button.innerText = ["Sign In", "Remove"][accountSwitcher.mode];
+        accountSwitcher.mode = (accountSwitcher.mode + 1) % 4;
+        button.innerText = ["Sign In", "Remove", "Copy", "Copy As Bookmark"][accountSwitcher.mode];
     },
     addToken: (token) => {
         if (!tokens.includes(token)) {
-            tokens.push(token);
-            localStorage.setItem("tokens", JSON.stringify(tokens));
-            fetch("https://api.dashcraft.io/auth/account", {headers: {Authorization: token}})
+            realFetch("https://api.dashcraft.io/auth/account", {headers: {Authorization: token}})
                 .then(response => response.json())
                 .then(data => {
-                    if (data.username) {
+                    if (data.username && !tokens.includes(token)) {
+                        tokens.push(token);
+                        localStorage.setItem("tokens", JSON.stringify(tokens));
                         let button = createButton(data.username);
                         button.addEventListener("click", () => {
                             if (accountSwitcher.mode == 0) {
@@ -255,10 +269,14 @@ let accountSwitcher = {
                                         };
                                     };
                                 };
-                            } else {
+                            } else if (accountSwitcher.mode == 1) {
                                 button.remove();
                                 tokens = tokens.filter(t => t != token);
                                 localStorage.setItem("tokens", JSON.stringify(tokens));
+                            } else if (accountSwitcher.mode == 2) {
+                                navigator.clipboard.writeText(token);
+                            } else if (accountSwitcher.mode == 3) {
+                                navigator.clipboard.writeText(`javascript: var newToken = "${token}"; var request = indexedDB.open("/idbfs"); request.onsuccess = function(event) { var db = event.target.result; var transaction = db.transaction("FILE_DATA", "readwrite"); var objectStore = transaction.objectStore("FILE_DATA"); var storeName = "/idbfs/a4cde6f7db08abc1da0fa04a69529237/PlayerPrefs"; objectStore.get(storeName).onsuccess = function(event) { var textEncoder = new TextEncoder("utf-8"); var oldContent = event.target.result; text = Array.from(oldContent.contents); var yourNewText = newToken; console.log("your new text: ", yourNewText); var updatedBytes = textEncoder.encode(yourNewText); var DECODED = (new TextDecoder("utf-8")).decode(new Uint8Array(text)); var startIndex = DECODED.indexOf("eyJ"); var endIndex = startIndex + 172; console.log(updatedBytes); text.splice(startIndex, 172, ...updatedBytes); var modifiedText = new Uint8Array(text); console.log(modifiedText); oldContent.contents = modifiedText; var RQ = objectStore.put(oldContent, storeName); RQ.onsuccess = (event) => {location.reload()};}; };`)
                             }
                         });
                         accountSwitcher.menu.appendChild(button);
@@ -266,6 +284,18 @@ let accountSwitcher = {
                 })
         }
     },
+    copyAllToClipboard: () => {
+        navigator.clipboard.writeText(tokens.join(", "));
+    },
+    addFromClipboard: () => {
+        navigator.clipboard.readText()
+            .then(text => {
+                let newTokens = text.split("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.").slice(1).map(t => `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.${t.slice(0, 135)}`).filter(t => t.length == 172);
+                for (let i = 0; i < newTokens.length; i++) {
+                    accountSwitcher.addToken(newTokens[i]);
+                }
+            })
+    }
 }
 
 
@@ -410,10 +440,17 @@ function createInput(placeholder, type, startCallback = () => {}, callback = () 
     input.type = type;
     input.classList.add("modInput");
 
-    startCallback(input);
-    input.addEventListener("input", callback.bind(null, input));
-    input.addEventListener("blur", blurCallback.bind(null, input));
-    return input;
+    let container = document.createElement("div");
+    container.classList.add("container");
+    container.appendChild(input);
+    testInput = container;
+
+    startCallback(input, container);
+
+    input.addEventListener("input", (event) => callback(input, container));
+    
+    input.addEventListener("blur", (event) => blurCallback(input, container));
+    return container;
 }
 
 function createSideMenu(text, callback = () => {}, startCallback = () => {}) {
@@ -510,6 +547,14 @@ document.addEventListener('DOMContentLoaded', () => {
             pointer-events: auto;
             transition: transform 0.1s ease-in-out;
         }
+
+        ::after {
+            pointer-events: none;
+        }
+
+        .modMenu * {
+            position: relative;
+        }
         .label {
             background-color: rgb(216, 84, 84);
             width: 100%;
@@ -552,20 +597,16 @@ document.addEventListener('DOMContentLoaded', () => {
             font-size: 0.75vw;
             text-align: left;
         }
-        .hoverButton {
-            position: relative;
-        }
+
         .hoverButton::after {
             content: "";
             position: absolute;
             right: 0.5vw;
-            top: 50%;
+            top: 0.75vw;
             transform: translateY(-50%);
             border-width: 0.7vw 0.7vw 0 0;
             border-style: solid;
             border-color: transparent rgba(255, 255, 255, 0.2) transparent transparent;
-            display: inline-block;
-            pointer-events: none;   
         }
 
         .modMenu button.enabled {
@@ -574,6 +615,21 @@ document.addEventListener('DOMContentLoaded', () => {
         .modMenu button:hover {
             background-color: rgba(0, 0, 0, 0.2);
         }
+        
+        
+        .toggleButton::after {
+            content: "";
+            position: absolute;
+            right: 0.2vw;
+            top: 0.2vw;
+            width: 0.2vw;
+            height: 1.1vw;
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+        .toggleButton.enabled::after {
+            background-color: rgb(216, 84, 84);
+        }
+
         .modMenu *:focus {
             outline: none;
         }
@@ -586,6 +642,21 @@ document.addEventListener('DOMContentLoaded', () => {
             border: none;
             color: white;
             font-size: 0.75vw;
+        }
+
+        .validCheck::after {
+            content: "";
+            position: absolute;
+            right: 0.4vw;
+            top: 0.4vw;
+            width: 0.7vw;
+            height: 0.7vw;
+            background-color: rgba(115, 216, 84, 1);;
+            border-radius: 50%;
+        }
+
+        .invalid::after {
+            background-color: rgb(216, 84, 84);;
         }
 
         .hoverButton {
@@ -612,7 +683,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let modLayer = document.createElement("div");
     modLayer.id = "modLayer";
-    modLayer.appendChild(document.createTextNode("DashCraft Modded v2.0"));
+    modLayer.appendChild(document.createTextNode("DashCraft Modded v2.0.1"));
     
     let miscMenu = createMenu("Miscellaneous", 0);
 
@@ -636,7 +707,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let accountMenu = createMenu("Accounts", 2);
 
     accountMenu.appendChild(createButton("Auto Add Accounts", accountSwitcher.autoAdd.reset, accountSwitcher.autoAdd.toggle));
-    accountMenu.appendChild(createSideMenu("Sign in", accountSwitcher.cycleMode, accountSwitcher.resetTokens));
+    accountMenu.appendChild(createSideMenu("Sign In", accountSwitcher.cycleMode, accountSwitcher.resetTokens));
+    accountMenu.appendChild(createSplitRow(
+        createButton("Copy All", undefined, accountSwitcher.copyAllToClipboard),
+        createButton("Paste", undefined, accountSwitcher.addFromClipboard)
+    ));
 
 
     modLayer.appendChild(miscMenu);
