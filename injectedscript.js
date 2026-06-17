@@ -1,15 +1,28 @@
 let rmc = {
+	timeLimit: 600,
     active: false,
+	verifieds: true,
     ids: [],
     trackId: null,
     trackLb: {},
     trackStarted: false,
     pbTime: Infinity,
     pbPos: Infinity,
-    timeNeeded: null,
     posNeeded: 0,
     gold: 0,
     paused: true,
+	menu: {
+		reset: (button) => {
+			rmc.menu.active = false
+			button.classList.add("toggleButton");
+		},
+		toggle: (button) => {
+			rmc.menu.active = !rmc.menu.active;
+			button.classList.toggle("enabled", rmc.menu.active);
+			rmc.menu.element.hidden = !rmc.menu.active;
+		},
+		active: false
+	},
     timer: {
         paused: true,
         startTime: null,
@@ -19,10 +32,13 @@ let rmc = {
             rmc.timer.startTime = Date.now(); 
             rmc.timer.paused = false
             rmc.timer.pauseTime = 0;
+		requestAnimationFrame(rmc.timer.update);
         },
         pause: () => {
-            rmc.timer.pauseStart = Date.now(); 
-            rmc.timer.paused = true
+			if (!rmc.timer.paused) {
+				rmc.timer.pauseStart = Date.now(); 
+				rmc.timer.paused = true;
+			}
         },
         resume: () => {
             if (rmc.timer.paused) {
@@ -36,20 +52,31 @@ let rmc = {
             } else {
                 return Date.now() - rmc.timer.startTime - rmc.timer.pauseTime;
             }
-        }
+        },
+		update: () => {
+			let time = rmc.timeLimit * 1000 - rmc.timer.getTime();
+			let ms = time % 1000;
+			let seconds = Math.floor((time / 1000) % 60);
+			let minutes = Math.floor(time / 60000);
+			rmc.menu.timer.innerText = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0').slice(0,2)}`;
+			requestAnimationFrame(rmc.timer.update);
+		}
 
     },
     fetchIds: async () => {
         let finished = false;
         let ids = [];
         const batchSize = 2500;
+		let numFetched = 0;
         for (let outer = 0; !finished; outer++) {
             let fetches = [];
             for (let inner = 0; inner < batchSize / 50; inner++) {
                 const page = outer * (batchSize / 50) + inner;
-                fetches.push(fetch(`https://api.dashcraft.io/trackv2/global3?sort=new&verifiedOnly=true&page=${page}&pageSize=50`)
+                fetches.push(fetch(`https://api.dashcraft.io/trackv2/global3?sort=new&verifiedOnly=${rmc.verifieds}&page=${page}&pageSize=50`)
                     .then(response => response.json())
                     .then(data => {
+						numFetched += data.tracks.length;
+						rmc.menu.statusIndicator.innerText = `Status: Fetching tracks (${numFetched})`;
                         if (data.tracks.length < 50) {
                             finished = true;
                         }
@@ -59,20 +86,40 @@ let rmc = {
             }
             ids = ids.concat((await Promise.all(fetches)).flat());
         }
+		rmc.menu.statusIndicator.innerText = "Status: Idle";
         return ids;
     },
-    start: async () => {
-        rmc.ids = await rmc.fetchIds();
-        rmc.active = true;
-        rmc.timer.start();
-        rmc.timer.pause();
-        rmc.nextTrack();
+    start: async (button) => {
+		if (!rmc.active) {
+			button.innerText = "Stop RMC";
+			rmc.ids = await rmc.fetchIds();
+			rmc.active = true;
+			rmc.timer.start();
+			rmc.nextTrack();
+		} else {
+			button.innerText = "Start RMC";
+			rmc.active = false;
+			rmc.menu.statusIndicator.innerText = "Status: Not started";
+		}
     },
     nextTrack: async() => {
+		rmc.trackStarted = false;
+        rmc.timer.pause();
+		rmc.menu.statusIndicator.innerText = "Status: Picking next track";
         rmc.trackId = rmc.ids[Math.floor(Math.random() * rmc.ids.length)];
         console.log(`Next track: ${rmc.trackId}`);
-        rmc.trackLb = await fetch(`https://api.dashcraft.io/trackv2/${rmc.trackId}/leaderboard`)
+        rmc.trackLb = await realFetch(`https://api.dashcraft.io/trackv2/${rmc.trackId}/leaderboard`)
             .then(response => response.json())
+		
+		rmc.posNeeded = Math.floor(rmc.trackLb.totalEntries / 10)
+		if (rmc.trackLb.leaderboard.length == 0 || rmc.trackLb.leaderboard[Math.min(rmc.posNeeded, 9)].time >= 60) {
+			rmc.nextTrack();
+			return;
+		}
+		let timeNeeded = rmc.posNeeded > 9 ? null : rmc.trackLb.leaderboard[rmc.posNeeded].time;
+		rmc.gold = Math.ceil((timeNeeded == null ? rmc.trackLb.leaderboard[9].time : timeNeeded) * 1.06);
+		rmc.menu.requirements.innerHTML = `Position Needed: ${rmc.posNeeded + 1} ${timeNeeded == null ? "" : `(${timeNeeded.toFixed(2)}s)`}<br>Gold Time: ${rmc.gold.toFixed(2)}s`;
+		rmc.menu.statusIndicator.innerText = "Status: Waiting for track start";
     }
 }
 
@@ -81,7 +128,6 @@ let testInput;
 let jsonEditor = {
     public: {
         reset: (button) => {
-            jsonEditor.public.force = localStorage.getItem("forcePublic") === "true";
             button.classList.add("toggleButton");
             button.classList.toggle("enabled", jsonEditor.public.force);
         },
@@ -89,9 +135,33 @@ let jsonEditor = {
         toggle: (button) => {
             jsonEditor.public.force = !jsonEditor.public.force;
             button.classList.toggle("enabled", jsonEditor.public.force);
-            localStorage.setItem("forcePublic", jsonEditor.public.force);
         }
     },
+	linkCps: {
+		reset: (button) => {
+			button.classList.add("toggleButton");
+			button.classList.toggle("enabled", jsonEditor.linkCps.linkAll);
+		},
+		linkAll: false,
+		toggle: (button) => {
+			jsonEditor.linkCps.linkAll = !jsonEditor.linkCps.linkAll;
+			button.classList.toggle("enabled", jsonEditor.linkCps.linkAll);
+		}
+	},
+	forceNew: {
+		button: null,
+		value: false,
+		reset: (button) => {
+			jsonEditor.forceNew.button = button;
+			jsonEditor.forceNew.value = false;
+			button.classList.add("toggleButton");
+			button.classList.toggle("enabled", jsonEditor.forceNew.value);
+		},
+		toggle: (button) => {
+			jsonEditor.forceNew.value = !jsonEditor.forceNew.value;
+			(button || jsonEditor.forceNew.button).classList.toggle("enabled", jsonEditor.forceNew.value);
+		}
+	},
     trackData: {
         resetToggle: (button) => {
             jsonEditor.trackData.override = localStorage.getItem("trackDataToggle") === "true";
@@ -129,6 +199,7 @@ let jsonEditor = {
                     .then(data => {
                         if (!data) return;
                         container.classList.remove("invalid");
+						jsonEditor.trackData.createInstructions();
                         jsonEditor.trackData.stored = data;
                         realFetch(`https://api.dashcraft.io/trackv2/${id}`)
                             .then(response => response.json())
@@ -145,12 +216,31 @@ let jsonEditor = {
                         jsonEditor.trackData.stored = {trackPieces: inputJson};
                     };
                     container.classList.remove("invalid");
+					jsonEditor.trackData.createInstructions();
                 } catch (e) {
+					console.log(e);
                     jsonEditor.trackData.stored = null;
                     container.classList.add("invalid");
                 }
             }
         },
+		instructionMenu: {
+			parent: null,
+			children: []
+		},
+		createInstructions: () => {
+			if (!jsonEditor.trackData.instructionMenu.parent || !jsonEditor.trackData.stored) return;
+			let instructions = getInstructions(jsonEditor.trackData.stored.trackPieces);
+			for (let i = 0; i < jsonEditor.trackData.instructionMenu.children.length; i++) {
+				jsonEditor.trackData.instructionMenu.children[i].remove();
+			}
+			instructions.forEach(instruction => {
+				let facing = ["+Z", "+X", "-Z", "-X"][instruction.a[3]];
+				let label = createLabel(`${instruction.count} at ${instruction.a.slice(0, 3).join(", ")} facing ${facing}`);
+				jsonEditor.trackData.instructionMenu.children.push(label);
+				jsonEditor.trackData.instructionMenu.parent.appendChild(label);
+			});
+		}
     },
 }
 
@@ -200,7 +290,36 @@ let misc = {
                 localStorage.setItem("thumbnailPosition", misc.thumbnailData.position.enabled);
             }
         },
-    }
+    },
+	openInEditor: {
+		input: null,
+		valid: false,
+		reset: (input, container) => {
+			misc.openInEditor.input = localStorage.getItem("openInEditorURL") || null;
+			input.value = misc.openInEditor.input;
+			container.classList.add("validCheck");
+			misc.openInEditor.set(input, container);
+		},
+		set: (input, container) => {
+			misc.openInEditor.input = input.value;
+			misc.openInEditor.valid = false;
+			localStorage.setItem("openInEditorInput", misc.openInEditor.input);
+			if (/^https:\/\/dashcraft.io\/?\?t=[0-9a-f]{24}$/.test(misc.openInEditor.input)) {
+				let id = misc.openInEditor.input.slice(-24);
+				realFetch(`https://cdn.dashcraft.io/v2/prod/track/${id}.json`)
+					.then(response => response.json())
+					.catch(error => {
+						container.classList.add("invalid");
+					})
+					.then(data => {
+						misc.openInEditor.valid = true;
+						container.classList.remove("invalid");
+					})
+			} else {
+				container.classList.add("invalid");
+			}
+		}
+	}
 }
 
 
@@ -385,7 +504,9 @@ document.addEventListener("keydown", function(event) {
         event.preventDefault();
         active = !active;
         for (let menu of menus) {
-            menu.classList.toggle("inactive", !active);
+			if (!menu.classList.contains("persistent")) {
+				menu.classList.toggle("inactive", !active);
+			}
         }
     }
 });
@@ -395,6 +516,7 @@ function createMenu(title, index = 0) {
     let menu = document.createElement("div");
     
     menu.style.left = `${index * 11 + 1}vw`;
+	menu.style.zIndex = -index;
     menu.classList.add("modMenu", "inactive");
 
     let label = document.createElement("div");
@@ -497,7 +619,7 @@ function createFileInput(text, type, callback) {
 function createLabel(text) {
     let div = document.createElement("div");
     div.classList.add("smallLabel")
-    div.innerText = text;
+    div.innerHTML = text;
     return div;
 }
 
@@ -505,8 +627,8 @@ function createLabel(text) {
 // ui
 document.addEventListener('DOMContentLoaded', () => {
 
-    const menuWidth = "10vw";
-    const menuHeight = "20vw";
+    const menuWidth = 10;
+    const menuHeight = 20;
     let css = document.createElement("style");
 
     css.innerHTML = `
@@ -540,8 +662,8 @@ document.addEventListener('DOMContentLoaded', () => {
         .modMenu {
             position: absolute;
             top: 1vw;
-            width: ${menuWidth};
-            height: ${menuHeight};
+            width: ${menuWidth}vw;
+            height: ${menuHeight}vw;
             border-radius: 0.5vw;
             background: rgb(43, 43, 43);
             pointer-events: auto;
@@ -668,7 +790,7 @@ document.addEventListener('DOMContentLoaded', () => {
             min-height: 1.5vw;
             top: 0;
             left: 100%;
-            width: ${menuWidth};
+            width: ${menuWidth}vw;
             background-color: rgb(43, 43, 43);
         }
 
@@ -683,7 +805,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let modLayer = document.createElement("div");
     modLayer.id = "modLayer";
-    modLayer.appendChild(document.createTextNode("DashCraft Modded v2.0.1"));
+    // modLayer.appendChild(document.createTextNode("DashCraft Modded v2.1.0"));
     
     let miscMenu = createMenu("Miscellaneous", 0);
 
@@ -692,19 +814,55 @@ document.addEventListener('DOMContentLoaded', () => {
         createInput("", "number", misc.pageSize.resetInput, misc.pageSize.set, misc.pageSize.blur)
     ));
     
-
     miscMenu.appendChild(createButton("Position in Thumbnail", misc.thumbnailData.position.reset, misc.thumbnailData.position.toggle));
+
+	miscMenu.appendChild(createInput("Open In Editor", "text", misc.openInEditor.reset, misc.openInEditor.set));
     
 
     let jsonMenu = createMenu("Track Editor", 1);
 
     jsonMenu.appendChild(createButton("Force Public", jsonEditor.public.reset, jsonEditor.public.toggle));
 
+	jsonMenu.appendChild(createButton("Link All Checkpoints", jsonEditor.linkCps.reset, jsonEditor.linkCps.toggle));
+
+	jsonMenu.appendChild(createButton("Force New Track", jsonEditor.forceNew.reset, jsonEditor.forceNew.toggle));
+
     jsonMenu.appendChild(createButton("Override Pieces", jsonEditor.trackData.resetToggle, jsonEditor.trackData.toggle));
     jsonMenu.appendChild(createInput("Link or JSON", "text", jsonEditor.trackData.resetInput, jsonEditor.trackData.update));
+	jsonMenu.appendChild(createSideMenu("Perfect Import Instructions", undefined, (button, menu) => {jsonEditor.trackData.instructionMenu.parent = menu; jsonEditor.trackData.createInstructions()}));
 
 
-    let accountMenu = createMenu("Accounts", 2);
+	let rmcMenu = createMenu("RMC Settings", 2);
+
+	rmcMenu.appendChild(createButton("Toggle Menu", rmc.menu.reset, rmc.menu.toggle));
+
+
+	rmc.menu.element = document.createElement("div");
+
+	rmc.menu.element.classList.add("modMenu", "persistent");
+
+	rmc.menu.element.appendChild(document.createElement("br"));
+	rmc.menu.element.appendChild(createButton("Start RMC", undefined, rmc.start));
+
+	rmc.menu.statusIndicator = createLabel("Status: Not started");
+	rmc.menu.element.appendChild(rmc.menu.statusIndicator);
+
+	rmc.menu.requirements = createLabel("Position Needed: N/A<br>Gold Time: N/A");
+	rmc.menu.element.appendChild(rmc.menu.requirements);
+
+	rmc.menu.timer = createLabel("10:00.00");
+	rmc.menu.timer.style.fontFamily = "monospace"; 
+	rmc.menu.element.appendChild(rmc.menu.timer);
+	
+
+	rmc.menu.element.style.right = `1vw`;
+	rmc.menu.element.style.width = `15vw`;
+	rmc.menu.element.style.top = `calc(50vh - ${menuHeight/2}vw)`;
+
+	rmc.menu.element.hidden = true;
+
+
+	let accountMenu = createMenu("Accounts", 3);
 
     accountMenu.appendChild(createButton("Auto Add Accounts", accountSwitcher.autoAdd.reset, accountSwitcher.autoAdd.toggle));
     accountMenu.appendChild(createSideMenu("Sign In", accountSwitcher.cycleMode, accountSwitcher.resetTokens));
@@ -714,9 +872,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ));
 
 
+
     modLayer.appendChild(miscMenu);
     modLayer.appendChild(jsonMenu);
-    modLayer.appendChild(accountMenu);
+	modLayer.appendChild(rmcMenu);
+	modLayer.appendChild(accountMenu);
+	modLayer.appendChild(rmc.menu.element);
     document.body.appendChild(modLayer);
 });
 
@@ -791,7 +952,6 @@ async function splitBlobByTextRange(blob, textStartMarker, textEndMarker) {
 
     return [beforeTextBuffer, decodedText, afterTextBuffer];
 }
-
 function rejoinBlob(parts) {
     return new Blob([
         parts[0],
@@ -802,10 +962,53 @@ function rejoinBlob(parts) {
 
 
 
+function getTotalPos(pieces) {
+	let totals = [0, 0, 0];
+	for (let i = 0; i < pieces.length; i++) {
+		totals = totals.map((p, index) => p + pieces[i].p[index]);
+	}
+	return totals;
+}
+function getTotalRot(pieces) {
+	let total = 0;
+	for (let i = 0; i < pieces.length; i++) {
+		total += pieces[i].r;
+	}
+	return total;
+}
+function getRemaining(total, instructions) {
+	for (let i = 0; i < instructions.length; i++) {
+		total = total.map((t, index) => t - instructions[i].a[index] * instructions[i].count);
+	}
+	return total;
+}
+
+function getInstructions(pieces) {
+	let instructions = [];
+	let total = [...getTotalPos(pieces), getTotalRot(pieces)];
+	let remaining;
+	
+	let range = [[-750, 750], [0, 1500], [-750, 750], [0, 270]];
+	let increment = [15, 15, 15, 90];
+	for (let i = 0; i < pieces.length; i++) {
+		if (i != 0) instructions[instructions.length - 1].count++;
+		remaining = getRemaining(total, instructions);	
+		if (i == 0 ||!remaining.every((r, index) => (Math.abs(r)) <= (pieces.length - i - 1) * Math.abs(range[index][(r > 0) ? 1 : 0]))) {
+			if (i != 0) instructions[instructions.length - 1].count--;
+			remaining = getRemaining(total, instructions);
+			let average = remaining.map(a => a / (pieces.length - i));
+			let instruction = average.map((a, index) => Math.round(a / increment[index]) * increment[index]);
+			instructions.push({a: instruction, count: 1});
+		}
+	}
+	instructions = instructions.map(instruction => {return {a: instruction.a.map((a, index) => a / increment[index]), count: instruction.count}});
+	return instructions;
+}
 
 const realFetch = window.fetch;
 window.fetch = (url, options) => {
 
+	// get tokens
     if (options && options.headers && options.headers.Authorization) {
         currentToken = options.headers.Authorization;
         if (accountSwitcher.autoAdd.value) {
@@ -813,6 +1016,24 @@ window.fetch = (url, options) => {
         }
     }
 
+	// change page size
+    if (misc.pageSize.override && url.length) {
+        url = url.replace("pageSize=15", `pageSize=${misc.pageSize.value}`)
+    }
+
+	// private saved tracks bugfix (always on)
+	if (/^https:\/\/api\.dashcraft\.io\/trackv2\/saved\?page=\d+&pageSize=\d{1,2}$/.test(url)) {
+		return new Promise(resolve => {
+			realFetch(url, options)
+			.then(response => response.json())
+			.then(data => {
+				data.tracks = data.tracks.map(track => {track.isPublic = true; return track;})
+				console.log(data.tracks);
+				const modifiedResponse = new Response(JSON.stringify(data));
+				resolve(modifiedResponse);
+			})
+		})
+	}
 
     // rmc
     if (rmc.active) {
@@ -825,9 +1046,9 @@ window.fetch = (url, options) => {
                 .then(data => {
                     if (data.currentTime < rmc.pbTime) {
                         rmc.pbTime = data.currentTime;
-                        rmc.pbPos = data.currentPos;
+                        rmc.pbPos = data.currentPlace;
                         if (rmc.pbPos <= rmc.posNeeded) {
-                            rmc.timer.pause();
+                            rmc.nextTrack();
                         }
                     }
                 });
@@ -836,8 +1057,8 @@ window.fetch = (url, options) => {
         }
         // override random fetch
         if (url == "https://api.dashcraft.io/trackv2/random?lean=true") {
-            if (rmc.trackStarted || Object.keys(rmc.trackLb).length == 0) return null;
-            rmc.trackStarted = true;
+            if (Object.keys(rmc.trackLb).length == 0) return null;
+            rmc.randomPressed = true;
 
             return new Promise(resolve => {
                 realFetch(url, options)
@@ -848,6 +1069,20 @@ window.fetch = (url, options) => {
                     });
             });
         }
+
+		if (url == `https://api.dashcraft.io/trackv2/${rmc.trackId}/leaderboard`) {
+			
+			let response = realFetch(url, options);
+
+			response.then(response => response.clone().json())
+				.then(data => {
+					rmc.trackStarted = true;
+					rmc.timer.resume();
+					rmc.menu.statusIndicator.innerText = "Status: Running";
+				});
+
+			return response;
+		}
     }
 
     // add data to thumbnail
@@ -864,54 +1099,70 @@ window.fetch = (url, options) => {
         });
     }
 
-    // change page size
-    if (misc.pageSize.override && url.length) {
-        url = url.replace("pageSize=15", `pageSize=${misc.pageSize.value}`)
-    }
+	// open in editor
+	if (misc.openInEditor.valid && /https:\/\/api\.dashcraft\.io\/trackv2\/user\/private\?page=0&pageSize=\d{2}/.test(url)) {
+		return new Promise(resolve => {
+			realFetch(url, options)
+			.then(response => response.json())
+			.then(data => {
+				data.tracks.splice(0, 0, {_id: misc.openInEditor.input.slice(-24)});
+				const modifiedResponse = new Response(JSON.stringify(data));
+				resolve(modifiedResponse);
+			})
+		})
+		
+	}
 
     // json editor
-    if (/^https:\/\/api\.dashcraft\.io\/trackv2\/update\/[0-9a-f]{24}$/.test(url) || url == "https://api.dashcraft.io/trackv2") {
-        return new Promise(resolve => {
-            testing = options.body;
-            splitBlobByTextRange(options.body, '{', '"computedDifficulty":null}')
-                .then(data => {
-                    let json = JSON.parse(data[1]);
+    if (/^https:\/\/api\.dashcraft\.io\/trackv2(\/update\/[0-9a-f]{24})?$/.test(url)) {
+		if (jsonEditor.forceNew.value) {
+			jsonEditor.forceNew.toggle();
+			return new Promise(resolve => {
+				resolve(new Response(""));
+			})
+		}
+		if (jsonEditor.public.force || jsonEditor.trackData.override || jsonEditor.linkCps.linkAll) {
+			return new Promise(resolve => {
+				splitBlobByTextRange(options.body, '{', '"computedDifficulty":null}')
+					.then(data => {
+						let json = JSON.parse(data[1]);
 
-                    json.daytimeId = 1;
-                    json.autoVerify = true;
-                    json.verified = true;
+						if (jsonEditor.public.force) {
+							json.isPublic = true;
+						}
 
-                    if (jsonEditor.public.force) {
-                        json.isPublic = true;
-                    }
+						if (jsonEditor.linkCps.linkAll) {
+							json.computedLinkedCheckpoints = [json.trackPieces.map(piece => piece.uid)];
+						}
 
-                    const storedData = jsonEditor.trackData.stored;
-                    if (jsonEditor.trackData.override && storedData) {
-                        let newPieces = fixData(storedData.trackPieces, json.trackPieces);
-                        if (newPieces) {
-                            json.trackPieces = newPieces;
-                            if (storedData.hasOwnProperty("environmentId")) {
-                                json.environmentId = storedData.environmentId;
-                            }
-                            if (storedData.hasOwnProperty("computedLinkedCheckpoints")) {
-                                json.computedLinkedCheckpoints = storedData.computedLinkedCheckpoints;
-                            }
-                            if (storedData.hasOwnProperty("screenshotCameraPosition")) {
-                                json.screenshotCameraPosition = storedData.screenshotCameraPosition;
-                            }
-                        } else {
-                            console.warn("too few pieces");
-                        }
-                    }
+						const storedData = jsonEditor.trackData.stored;
+						if (jsonEditor.trackData.override && storedData) {
+							let newPieces = fixData(storedData.trackPieces, json.trackPieces);
+							if (newPieces) {
+								json.trackPieces = newPieces;
+								if (storedData.hasOwnProperty("environmentId")) {
+									json.environmentId = storedData.environmentId;
+								}
+								if (storedData.hasOwnProperty("computedLinkedCheckpoints")) {
+									json.computedLinkedCheckpoints = storedData.computedLinkedCheckpoints;
+								}
+								if (storedData.hasOwnProperty("screenshotCameraPosition")) {
+									json.screenshotCameraPosition = storedData.screenshotCameraPosition;
+								}
+							} else {
+								console.warn("too few pieces");
+							}
+						}
 
-                    data[1] = JSON.stringify(json);
-                    options.body = rejoinBlob(data);
+						data[1] = JSON.stringify(json);
+						options.body = rejoinBlob(data);
 
 
-                    return realFetch(url, options);
-                })
-                .then(response => resolve(response))
-            })
+						return realFetch(url, options);
+					})
+					.then(response => resolve(response))
+				})
+		}
     }
     return realFetch(url, options);
 }
