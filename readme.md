@@ -15,7 +15,7 @@ To install the extension, go to chrome://extensions and turn developer mode on i
 **NOTE:** The folder will be 2 layers deep because of how Github exports the files (something like `C:\Users\Username\Downloads\Dashcraft-Tools-V2-main\Dashcraft-Tools-V2-main`).
 
 # Using the extension
-When you press tab, a few menus should pop up on the top of the screen.
+When you open the game and press tab, a few menus should pop up on the top of the screen.
 
 
 ## Miscellaneous
