@@ -913,42 +913,42 @@ function fixData(data, original) {
 // override fetch
 
 
-// ai generated because i don't even know what a blob is
 async function splitBlobByTextRange(blob, textStartMarker, textEndMarker) {
-    
     const buffer = await blob.arrayBuffer();
     const uint8 = new Uint8Array(buffer);
-
-    const encoder = new TextEncoder();
-    const startMarkerBytes = encoder.encode(textStartMarker);
-    const endMarkerBytes = encoder.encode(textEndMarker);
-
-    function findMarkerIndex(data, marker, fromIndex = 0) {
-        outer: for (let i = fromIndex; i <= data.length - marker.length; i++) {
-            for (let j = 0; j < marker.length; j++) {
-                if (data[i + j] !== marker[j]) {
-                    continue outer;
-                }
+    const decoder = new TextDecoder("utf-8");
+    function indexOfSequence(source, target, fromIndex = 0) {
+        const targetLen = target.length;
+        if (targetLen === 0) return -1;
+        const limit = source.length - targetLen;
+        for (let i = fromIndex; i <= limit; i++) {
+            if (source[i] === target[0]) {
+                let j = 1;
+                while (j < targetLen && source[i + j] === target[j]) j++;
+                if (j === targetLen) return i;
             }
-            return i;
         }
         return -1;
     }
+    const encoder = new TextEncoder();
+    const startBytes = encoder.encode(textStartMarker);
+    const endBytes = encoder.encode(textEndMarker);
 
-    const startIndex = findMarkerIndex(uint8, startMarkerBytes);
+    const startIndex = indexOfSequence(uint8, startBytes);
     if (startIndex === -1) throw new Error("Start marker not found in blob");
+    const markerIndex = indexOfSequence(uint8, endBytes, startIndex);
+    if (markerIndex === -1) throw new Error("End marker not found in blob");
 
-    const endIndex = findMarkerIndex(uint8, endMarkerBytes, startIndex);
-    if (endIndex === -1) throw new Error("End marker not found in blob");
+    const searchStart = markerIndex + endBytes.length;
+    const closingBraceByte = 125;
+    const endIndex = uint8.indexOf(closingBraceByte, searchStart);
+    if (endIndex === -1) throw new Error("Closing brace not found in blob");
 
-    const textEndIndex = endIndex + endMarkerBytes.length;
-
-    // Preserve all parts
+    const textEndIndex = endIndex + 1;
     const beforeTextBuffer = buffer.slice(0, startIndex);
     const textPartBuffer = buffer.slice(startIndex, textEndIndex);
     const afterTextBuffer = buffer.slice(textEndIndex);
-
-    const decodedText = new TextDecoder("utf-8").decode(textPartBuffer);
+    const decodedText = decoder.decode(textPartBuffer);
 
     return [beforeTextBuffer, decodedText, afterTextBuffer];
 }
@@ -1123,7 +1123,7 @@ window.fetch = (url, options) => {
 		}
 		if (jsonEditor.public.force || jsonEditor.trackData.override || jsonEditor.linkCps.linkAll) {
 			return new Promise(resolve => {
-				splitBlobByTextRange(options.body, '{', '"computedDifficulty":null}')
+				splitBlobByTextRange(options.body, '{', '"computedDifficulty":')
 					.then(data => {
 						let json = JSON.parse(data[1]);
 
