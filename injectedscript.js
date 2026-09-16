@@ -1123,9 +1123,10 @@ window.fetch = (url, options) => {
 		}
 		if (jsonEditor.public.force || jsonEditor.trackData.override || jsonEditor.linkCps.linkAll) {
 			return new Promise(resolve => {
-				splitBlobByTextRange(options.body, '{', '"computedDifficulty":null}')
+				splitBlobByTextRange(options.body, '{', '"computedDifficulty":')
 					.then(data => {
-						let json = JSON.parse(data[1]);
+						let json = JSON.parse(data[1].slice(0, -22) + "}");
+						console.log(json);
 
 						if (jsonEditor.public.force) {
 							json.isPublic = true;
@@ -1153,8 +1154,8 @@ window.fetch = (url, options) => {
 								console.warn("too few pieces");
 							}
 						}
-
-						data[1] = JSON.stringify(json);
+						delete json.computedDifficulty;
+						data[1] = JSON.stringify(json).slice(0, -1) + ',"computedDifficulty":';
 						options.body = rejoinBlob(data);
 
 
