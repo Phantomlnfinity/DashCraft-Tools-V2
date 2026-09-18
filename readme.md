@@ -44,6 +44,8 @@ Enabling this makes the game forget the ID of the track you're working on, so it
 ### Override Pieces
 This mod replaces your track with whatever link or data you input. If your input is valid, there will be a green dot on the right. Then, open a track that has more pieces than what you're replacing it with, save, and reopen the track.
 
+Use https://phantomlnfinity.github.io/DashCraft-JSON-Editor/ to download and edit JSON.
+
 
 ## Account Switcher
 
